@@ -1,11 +1,11 @@
-# syntax=docker/dockerfile:experimental
-# Visit https://github.com/Islandora-Devops/isle-buildkit for info about the container used
-FROM local/java:latest
+# syntax=docker/dockerfile:1.2.1
+ARG repository=local
+ARG tag=latest
+FROM --platform=$BUILDPLATFORM ${repository}/download:${tag} AS download
 
 # Download Handle & the java mysql driver
 # And install them into /opt/handle directory
-RUN --mount=id=downloads,type=cache,target=/opt/downloads \
-    DOWNLOAD_CACHE_DIRECTORY="/opt/downloads" && \
+RUN --mount=type=cache,id=handle-downloads,sharing=locked,target=/opt/downloads \
     HANDLE_VERSION="9.3.0" && \
     HANDLE_FILE="handle-${HANDLE_VERSION}-distribution.tar.gz" && \
     HANDLE_URL="http://handle.net/hnr-source/${HANDLE_FILE}" && \
@@ -24,11 +24,16 @@ RUN --mount=id=downloads,type=cache,target=/opt/downloads \
     install-service.sh --name "handle" --file "${DOWNLOAD_CACHE_DIRECTORY}/${HANDLE_FILE}" doc handle-9.3.0-src.zip jeUpgradeTool && \
     tar -xzf "${DOWNLOAD_CACHE_DIRECTORY}/${MYSQL_DRIVER_FILE}" -C /opt/handle/lib "mysql-connector-java-${MYSQL_DRIVER_VERSION}/${MYSQL_DRIVER_FILE%%.tar.gz}.jar" --strip-components 1 && \
     cp "${DOWNLOAD_CACHE_DIRECTORY}/${POSTGRES_DRIVER_FILE}" "/opt/handle/lib/${POSTGRES_DRIVER_FILE}" && \
-    mkdir -p /opt/handle /opt/keys/handle /var/handle/logs && \
-    chown -R handle:handle /opt/handle /opt/keys/handle /var/handle && \
-    cleanup.sh
+    mkdir -p \
+        /opt/keys/handle \
+        /var/handle/logs \
+    && \
+    chown -R handle:handle \
+        /opt/handle \
+        /opt/keys/handle \
+        /var/handle
 
-WORKDIR /var/handle
+FROM ${repository}/java:${tag}
 
 EXPOSE 8000/tcp
 EXPOSE 2641/tcp
@@ -44,22 +49,24 @@ ENV \
     HANDLE_ADMIN_FULL_ACCESS=yes \
     HANDLE_ALLOW_NA_ADMINS=yes \
     HANDLE_CASE_SENSITIVE=no \
-    HANDLE_DB_MYSQL_HOST=mariadb \
-    HANDLE_DB_MYSQL_PORT=3306 \
     HANDLE_DB_NAME=handle \
     HANDLE_DB_PASSWORD=password \
-    HANDLE_DB_POSTGRESQL_HOST=postgresql \
-    HANDLE_DB_POSTGRESQL_PORT=5432 \
     HANDLE_DB_READONLY=no \
-    HANDLE_DB_ROOT_PASSWORD=password \
-    HANDLE_DB_ROOT_USER=root \
     HANDLE_DB_USER=handle \
     HANDLE_MAX_AUTH_TIME=60000 \
     HANDLE_MAX_SESSION_TIME=86400000 \
-    HANDLE_PERSISTENCE_TYPE=mysql \
     HANDLE_PREFIX=200 \
     HANDLE_SERVER_ID=1 \
-    HANDLE_STORAGE_TYPE=bdbje \
+    HANDLE_PERSISTENCE_TYPE=bdbje \
     HANDLE_TEMPLATE_NS_OVERRIDE=no
 
+COPY --from=download /etc/group /etc/group
+COPY --from=download /etc/passwd /etc/passwd
+COPY --from=download /etc/shadow /etc/shadow
+COPY --from=download --chown=handle:handle /opt/handle /opt/handle
+COPY --from=download --chown=handle:handle /opt/keys/handle /opt/keys/handle
+COPY --from=download --chown=handle:handle /var/handle /var/handle
+
 COPY rootfs /
+
+WORKDIR /var/handle
